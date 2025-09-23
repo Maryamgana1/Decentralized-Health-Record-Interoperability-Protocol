@@ -63,6 +63,11 @@ plan:
     - id: 0
       transactions:
         - emulated-contract-publish:
+            contract-name: provider-verification
+            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+            path: contracts/provider-verification.clar
+            clarity-version: 3
+        - emulated-contract-publish:
             contract-name: access-control
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
             path: contracts/access-control.clar

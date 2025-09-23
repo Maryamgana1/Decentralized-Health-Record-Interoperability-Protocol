@@ -12,13 +12,19 @@ export type HealthRecordType =
   | 'diagnoses'
   | 'vital-signs';
 
-export type AuditEventType = 
+export type AuditEventType =
   | 'access_granted'
   | 'access_used'
   | 'access_revoked'
   | 'record_uploaded'
   | 'record_updated'
-  | 'record_deleted';
+  | 'record_deleted'
+  | 'provider_registered'
+  | 'provider_verified'
+  | 'provider_suspended'
+  | 'provider_reactivated'
+  | 'credentials_updated'
+  | 'credentials_expired';
 
 export type AccessGrantStatus = 
   | 'active'

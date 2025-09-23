@@ -4,3 +4,4 @@ export * from './storage';
 export * from './encryption';
 export * from './audit';
 export * from './access';
+export * from './verification';

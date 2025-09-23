@@ -13,6 +13,10 @@ epoch = "latest"
 path = "contracts/audit-trail.clar"
 epoch = "latest"
 
+[contracts.provider-verification]
+path = "contracts/provider-verification.clar"
+epoch = "latest"
+
 [repl.analysis]
 passes = ["check_checker"]
 check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
