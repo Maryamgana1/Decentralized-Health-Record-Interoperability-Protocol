@@ -3,4 +3,5 @@ export * from './PatientProfile';
 export * from './HealthRecord';
 export * from './AccessGrant';
 export * from './AuditEvent';
+export * from './ProviderCredential';
 export * from './types';
