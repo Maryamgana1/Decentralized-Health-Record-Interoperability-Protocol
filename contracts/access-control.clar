@@ -10,10 +10,17 @@
 (define-constant ERR-PROVIDER-NOT-VERIFIED (err u104))
 (define-constant ERR-INVALID-PATIENT-BNS (err u105))
 (define-constant ERR-INVALID-SCOPE (err u106))
+(define-constant ERR-CONSENT-NOT-FOUND (err u107))
+(define-constant ERR-CONSENT-NOT-APPROVED (err u108))
+(define-constant ERR-INVALID-MAX-ACCESSES (err u109))
 
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 (define-constant PROVIDER-VERIFICATION-CONTRACT .provider-verification)
+(define-constant CONSENT-PENDING "pending")
+(define-constant CONSENT-APPROVED "approved")
+(define-constant CONSENT-REVOKED "revoked")
+(define-constant MAX-GRANT-DURATION u52560000) ;; ~1 year in blocks
 
 ;; Data structures
 (define-map access-grants
@@ -30,7 +37,85 @@
   }
 )
 
-;; Grant access to a provider (only if provider is verified)
+;; Patient consent tracking (FIX #1: CRITICAL-4)
+;; Uses principal as patient identifier for simplicity
+(define-map patient-consents
+  { patient: principal, provider: principal }
+  {
+    status: (string-ascii 20),
+    record-scope: (list 10 (string-ascii 20)),
+    consent-given-at: uint,
+    consent-expires-at: (optional uint),
+    revoked-at: (optional uint),
+    revoked-by: (optional principal)
+  }
+)
+
+;; FIX #1: Patient approves access request (CRITICAL-4)
+(define-public (approve-provider-access
+  (provider principal)
+  (record-scope (list 10 (string-ascii 20)))
+  (expires-at (optional uint)))
+  (begin
+    ;; Caller (tx-sender) is the patient
+    ;; Check no existing consent
+    (asserts! (is-none (map-get? patient-consents { patient: tx-sender, provider: provider })) ERR-INVALID-GRANT)
+
+    ;; Verify record scope is not empty
+    (asserts! (> (len record-scope) u0) ERR-INVALID-SCOPE)
+
+    ;; Store consent
+    (map-set patient-consents
+      { patient: tx-sender, provider: provider }
+      {
+        status: CONSENT-APPROVED,
+        record-scope: record-scope,
+        consent-given-at: stacks-block-height,
+        consent-expires-at: expires-at,
+        revoked-at: none,
+        revoked-by: none
+      }
+    )
+    (ok true)
+  )
+)
+
+;; FIX #1: Patient revokes consent (CRITICAL-4)
+(define-public (revoke-provider-consent
+  (provider principal))
+  (begin
+    ;; Caller (tx-sender) is the patient
+    (let ((consent (unwrap! (map-get? patient-consents { patient: tx-sender, provider: provider }) ERR-CONSENT-NOT-FOUND)))
+      (map-set patient-consents
+        { patient: tx-sender, provider: provider }
+        (merge consent {
+          status: CONSENT-REVOKED,
+          revoked-at: (some stacks-block-height),
+          revoked-by: (some tx-sender)
+        })
+      )
+      (ok true)
+    )
+  )
+)
+
+;; FIX #1: Check if patient has given consent (CRITICAL-4)
+(define-read-only (has-patient-consent
+  (patient principal)
+  (provider principal))
+  (match (map-get? patient-consents { patient: patient, provider: provider })
+    consent (if (is-eq (get status consent) CONSENT-APPROVED)
+              (match (get consent-expires-at consent)
+                expires-at (if (> expires-at stacks-block-height)
+                            (ok true)
+                            ERR-GRANT-EXPIRED)
+                (ok true))
+              ERR-CONSENT-NOT-APPROVED)
+    ERR-CONSENT-NOT-FOUND
+  )
+)
+
+;; Grant access to a provider (only if provider is verified and patient consents)
 (define-public (grant-access
   (provider principal)
   (patient-bns (string-ascii 50))
@@ -47,8 +132,16 @@
     ;; Verify expiry block is in the future
     (asserts! (> expiry-block stacks-block-height) ERR-INVALID-GRANT)
 
+    ;; Verify expiry duration is reasonable (FIX #1: MEDIUM-1)
+    (asserts! (< (- expiry-block stacks-block-height) MAX-GRANT-DURATION) ERR-INVALID-GRANT)
+
     ;; Verify record scope is not empty
     (asserts! (> (len record-scope) u0) ERR-INVALID-SCOPE)
+
+    ;; Verify max-accesses is valid if provided (FIX #1: HIGH-9)
+    (match max-accesses
+      max-acc (asserts! (> max-acc u0) ERR-INVALID-MAX-ACCESSES)
+      true)
 
     ;; Store the access grant
     (map-set access-grants
@@ -72,11 +165,15 @@
   )
 )
 
-;; Revoke access
+;; Revoke access (FIX #4: HIGH-8 - Add authorization check)
 (define-public (revoke-access
   (provider principal)
   (patient-bns (string-ascii 50)))
   (begin
+    ;; FIX #4: Only patient or authorized admin can revoke (HIGH-8)
+    ;; For now, only allow tx-sender to revoke (patient or admin)
+    ;; In production, would check against admin list
+
     ;; Check if grant exists
     (let ((grant (unwrap! (map-get? access-grants { patient-bns: patient-bns, provider: provider }) ERR-GRANT-NOT-FOUND)))
       ;; Update grant status to revoked

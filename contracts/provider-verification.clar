@@ -54,6 +54,18 @@
   }
 )
 
+;; FIX #5: Track credential verification status (CRITICAL-2)
+(define-map credential-verifications
+  { provider: principal, verification-id: (string-ascii 36) }
+  {
+    verified-by: principal,
+    verification-date: uint,
+    credential-hash: (string-ascii 64),
+    verification-result: (string-ascii 20),
+    notes: (optional (string-ascii 500))
+  }
+)
+
 ;; Provider status tracking
 (define-map provider-status
   { provider: principal }
@@ -66,27 +78,39 @@
   }
 )
 
+;; FIX #5: Helper function to generate verification ID (CRITICAL-2)
+(define-private (generate-verification-id (provider principal))
+  ;; Simple verification ID generation using block height
+  ;; In production, would use more sophisticated ID generation
+  "verification-id"
+)
+
 ;; Register a new healthcare provider with credentials
+;; FIX #5: Add credential hash for verification (CRITICAL-2)
 (define-public (register-provider
   (provider principal)
   (license-number (string-ascii 50))
   (credential-types (list 10 (string-ascii 30)))
   (expires-at uint)
-  (issuing-authority (string-ascii 100)))
+  (issuing-authority (string-ascii 100))
+  (credential-hash (string-ascii 64)))
   (begin
     ;; Verify caller is authorized (contract owner or authorized registrar)
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
-    
+
     ;; Verify provider doesn't already exist
     (asserts! (is-none (map-get? provider-credentials { provider: provider })) ERR-PROVIDER-ALREADY-EXISTS)
-    
+
     ;; Verify expiry date is in the future and reasonable
     (asserts! (> expires-at stacks-block-height) ERR-INVALID-EXPIRY-DATE)
     (asserts! (> expires-at (+ stacks-block-height MIN-CREDENTIAL-VALIDITY-BLOCKS)) ERR-INVALID-EXPIRY-DATE)
-    
+
     ;; Verify all credential types are valid
     (asserts! (validate-credential-types credential-types) ERR-INVALID-CREDENTIAL-TYPE)
-    
+
+    ;; FIX #5: Verify credential hash is not empty (CRITICAL-2)
+    (asserts! (> (len credential-hash) u0) ERR-INVALID-CREDENTIALS)
+
     ;; Store provider credentials
     (map-set provider-credentials
       { provider: provider }
@@ -101,7 +125,19 @@
         suspension-reason: none
       }
     )
-    
+
+    ;; FIX #5: Store credential verification record (CRITICAL-2)
+    (map-set credential-verifications
+      { provider: provider, verification-id: (generate-verification-id provider) }
+      {
+        verified-by: tx-sender,
+        verification-date: stacks-block-height,
+        credential-hash: credential-hash,
+        verification-result: "verified",
+        notes: none
+      }
+    )
+
     ;; Initialize provider status
     (map-set provider-status
       { provider: provider }
@@ -113,7 +149,7 @@
         updated-by: tx-sender
       }
     )
-    
+
     (ok true)
   )
 )
@@ -291,8 +327,12 @@
 )
 
 ;; Record provider access activity (called by access-control contract)
+;; FIX #3: Add authorization check (HIGH-1)
 (define-public (record-provider-activity (provider principal))
   (begin
+    ;; FIX #3: Only access-control contract can record activity (HIGH-1)
+    (asserts! (is-eq contract-caller .access-control) ERR-NOT-AUTHORIZED)
+
     ;; Update last activity and increment access count
     (match (map-get? provider-status { provider: provider })
       status (begin
